@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, TimeZone, Utc};
+use clap::{Args, Parser, Subcommand};
 use plotters::prelude::*;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
@@ -214,7 +215,9 @@ fn plot(db: &Db) -> Result<()> {
     Ok(())
 }
 
-async fn build(db: &mut Db) -> Result<()> {
+async fn build(db: &mut Db, opt: Option<OptCheck>) -> Result<()> {
+    let update_db = opt.is_none();
+
     let dir = PathBuf::from(BUILD_DIR);
 
     if !dir.exists() {
@@ -231,11 +234,19 @@ async fn build(db: &mut Db) -> Result<()> {
         }
     }
 
-    let binary = reqwest::get(VERYL_RELEASE).await?.bytes().await?;
-    zip_extract::extract(Cursor::new(binary), &dir, true)?;
-    let mut veryl = dir.clone();
-    veryl.push("veryl");
-    let veryl = veryl.canonicalize()?;
+    let veryl = if let Some(opt) = &opt {
+        if let Some(path) = &opt.path {
+            path.canonicalize()?
+        } else {
+            which::which("veryl")?
+        }
+    } else {
+        let binary = reqwest::get(VERYL_RELEASE).await?.bytes().await?;
+        zip_extract::extract(Cursor::new(binary), &dir, true)?;
+        let mut veryl = dir.clone();
+        veryl.push("veryl");
+        veryl.canonicalize()?
+    };
 
     let version = Command::new(&veryl).arg("--version").output()?;
     let version = String::from_utf8(version.stdout)?;
@@ -243,6 +254,15 @@ async fn build(db: &mut Db) -> Result<()> {
 
     let mut build_logs = vec![];
     for (id, prj) in &db.projects {
+        if !update_db {
+            let latest_log = prj.build_logs.last();
+            if let Some(latest_log) = latest_log {
+                if !latest_log.result {
+                    continue;
+                }
+            }
+        }
+
         let path = prj.url.path().strip_prefix('/').unwrap();
         let path = PathBuf::from(path);
         println!("Checkout: {}", prj.url);
@@ -265,10 +285,12 @@ async fn build(db: &mut Db) -> Result<()> {
             .output()?;
         let rev = String::from_utf8(rev.stdout)?.trim().to_string();
 
-        let latest_log = prj.build_logs.last();
-        if let Some(latest_log) = latest_log {
-            if latest_log.rev == rev && latest_log.veryl_version == version {
-                continue;
+        if update_db {
+            let latest_log = prj.build_logs.last();
+            if let Some(latest_log) = latest_log {
+                if latest_log.rev == rev && latest_log.veryl_version == version {
+                    continue;
+                }
             }
         }
 
@@ -299,9 +321,44 @@ async fn build(db: &mut Db) -> Result<()> {
             .and_modify(|x| x.build_logs.push(build_log));
     }
 
-    db.save(&PathBuf::from(JSON_PATH))?;
+    if update_db {
+        db.save(&PathBuf::from(JSON_PATH))?;
+    }
 
     Ok(())
+}
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+#[command(propagate_version = true)]
+struct Opt {
+    /// No output printed to stdout
+    #[arg(long, global = true)]
+    pub quiet: bool,
+
+    /// Use verbose output
+    #[arg(long, global = true)]
+    pub verbose: bool,
+
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Update(OptUpdate),
+    Check(OptCheck),
+}
+
+/// Update DB
+#[derive(Args)]
+pub struct OptUpdate;
+
+/// Check
+#[derive(Args)]
+pub struct OptCheck {
+    #[arg(long)]
+    path: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -319,9 +376,18 @@ async fn main() -> Result<()> {
         Db::default()
     };
 
-    let _ = update(&mut db).await?;
-    plot(&db)?;
-    let _ = build(&mut db).await?;
+    let opt = Opt::parse();
+
+    match opt.command {
+        Commands::Update(_) => {
+            let _ = update(&mut db).await?;
+            plot(&db)?;
+            let _ = build(&mut db, None).await?;
+        }
+        Commands::Check(x) => {
+            let _ = build(&mut db, Some(x)).await?;
+        }
+    }
 
     Ok(())
 }
