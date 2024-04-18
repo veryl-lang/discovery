@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::str::FromStr;
 use url::Url;
+use walkdir::WalkDir;
 
 #[derive(Default, Serialize, Deserialize, Debug)]
 pub struct Db {
@@ -257,7 +258,7 @@ async fn build(db: &mut Db, opt: Option<OptCheck>) -> Result<()> {
         if !update_db {
             let latest_log = prj.build_logs.last();
             if let Some(latest_log) = latest_log {
-                if !latest_log.result {
+                if !latest_log.result && !opt.as_ref().unwrap().all {
                     continue;
                 }
             }
@@ -294,11 +295,23 @@ async fn build(db: &mut Db, opt: Option<OptCheck>) -> Result<()> {
             }
         }
 
-        let build = Command::new(&veryl)
-            .arg("build")
-            .current_dir(&prj_dir)
-            .output()?;
-        let result = build.status.success();
+        let mut veryl_root = None;
+        for entry in WalkDir::new(&prj_dir) {
+            let entry = entry?;
+            if entry.file_name() == "Veryl.toml" {
+                veryl_root = Some(entry.path().parent().unwrap().to_path_buf());
+            }
+        }
+
+        let result = if let Some(veryl_root) = veryl_root {
+            let build = Command::new(&veryl)
+                .arg("build")
+                .current_dir(&veryl_root)
+                .output()?;
+            build.status.success()
+        } else {
+            false
+        };
 
         let build_log = BuildLog {
             rev,
@@ -359,6 +372,8 @@ pub struct OptUpdate;
 pub struct OptCheck {
     #[arg(long)]
     path: Option<PathBuf>,
+    #[arg(long)]
+    all: bool,
 }
 
 #[tokio::main]

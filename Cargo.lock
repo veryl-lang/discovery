@@ -2258,6 +2258,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "url",
+ "walkdir",
  "which",
  "zip-extract",
 ]
