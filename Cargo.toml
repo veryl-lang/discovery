@@ -12,7 +12,7 @@ chrono      = {version = "0.4.38", features = ["serde"]}
 http        = "1.1"
 octocrab    = "0.38.0"
 plotters    = "0.3.6"
-reqwest     = "0.12.4"
+reqwest     = "0.12.5"
 secrecy     = "0.8.0"
 semver      = "1.0"
 serde       = {version = "1.0", features = ["derive"]}
