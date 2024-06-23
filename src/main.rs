@@ -12,6 +12,8 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::str::FromStr;
+use std::time::Duration;
+use tokio::time;
 use url::Url;
 use walkdir::WalkDir;
 
@@ -103,6 +105,8 @@ async fn update(db: &mut Db) -> Result<()> {
 
     let page = octocrab.search().code("extension:veryl").send().await?;
     let sources = page.total_count.unwrap_or(0);
+
+    time::sleep(Duration::from_secs(60)).await;
 
     let mut page = octocrab.search().code("filename:Veryl.toml").send().await?;
     let mut projects = HashSet::new();
