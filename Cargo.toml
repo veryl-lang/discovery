@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow      = "1.0"
-clap        = {version = "4.5.10", features = ["derive"]}
+clap        = {version = "4.5.11", features = ["derive"]}
 chrono      = {version = "0.4.38", features = ["serde"]}
 http        = "1.1"
 octocrab    = "0.38.0"
