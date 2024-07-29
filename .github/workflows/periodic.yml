@@ -3,7 +3,7 @@ name: Periodic
 on:
   workflow_dispatch:
   schedule:
-  - cron: 0 0 * * SUN
+  - cron: 30 2 * * SUN
 
 jobs:
   build:
