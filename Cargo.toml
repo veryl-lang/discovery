@@ -10,7 +10,7 @@ anyhow      = "1.0"
 clap        = {version = "4.5.12", features = ["derive"]}
 chrono      = {version = "0.4.38", features = ["serde"]}
 http        = "1.1"
-octocrab    = "0.38.0"
+octocrab    = "0.39.0"
 plotters    = "0.3.6"
 reqwest     = "0.12.5"
 secrecy     = "0.8.0"
