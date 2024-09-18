@@ -1325,7 +1325,7 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "pin-project",
- "secrecy",
+ "secrecy 0.8.0",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -1830,6 +1830,15 @@ name = "secrecy"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9bd1c54ea06cfd2f6b63219704de0b9b4f72dcc2b8fdef820be6cd799780e91e"
+dependencies = [
+ "zeroize",
+]
+
+[[package]]
+name = "secrecy"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d97d6b0620457bfe19b3b0fbfdd4c2c172a14c108096b8ff8bca6a71001f5d91"
 dependencies = [
  "zeroize",
 ]
@@ -2379,7 +2388,7 @@ dependencies = [
  "octocrab",
  "plotters",
  "reqwest",
- "secrecy",
+ "secrecy 0.10.1",
  "semver",
  "serde",
  "serde_json",
