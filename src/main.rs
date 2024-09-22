@@ -4,6 +4,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use clap::{Args, Parser, Subcommand};
 use plotters::prelude::*;
 use secrecy::SecretString;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
@@ -21,6 +22,8 @@ use walkdir::WalkDir;
 pub struct Db {
     pub discovered: Vec<Discovered>,
     pub projects: HashMap<u64, Project>,
+    #[serde(default)]
+    pub downloads: HashMap<Version, Vec<Download>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -58,6 +61,41 @@ impl Db {
         self.discovered.push(discovered);
     }
 
+    pub fn push_release(&mut self, releases: &[GithubRelease]) {
+        let date = Utc::now();
+        for release in releases {
+            let version = release.name.strip_prefix("v").unwrap();
+            let version = Version::parse(version).unwrap();
+
+            let mut counts = HashMap::new();
+
+            for asset in &release.assets {
+                let platform = match asset.name.as_str() {
+                    "veryl-x86_64-linux.zip" => Platform::X86_64Linux,
+                    "veryl-x86_64-mac.zip" => Platform::X86_64Mac,
+                    "veryl-x86_64-windows.zip" => Platform::X86_64Windows,
+                    "veryl-aarch64-mac.zip" => Platform::Aarch64Mac,
+                    _ => unreachable!(),
+                };
+                counts.insert(platform, asset.download_count);
+            }
+
+            let download = Download {
+                date: date.clone(),
+                counts,
+            };
+
+            self.downloads
+                .entry(version)
+                .and_modify(|x| {
+                    if x.last().unwrap().counts != download.counts {
+                        x.push(download.clone());
+                    }
+                })
+                .or_insert(vec![download]);
+        }
+    }
+
     pub fn insert_project(&mut self, prj: Project) -> u64 {
         if let Some(id) = self.find_project(&prj.url) {
             id
@@ -90,12 +128,40 @@ pub struct Discovered {
     pub projects: Vec<u64>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Download {
+    #[serde(with = "ts_seconds")]
+    pub date: DateTime<Utc>,
+    pub counts: HashMap<Platform, u64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone)]
+pub enum Platform {
+    Aarch64Mac,
+    X86_64Linux,
+    X86_64Mac,
+    X86_64Windows,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct GithubRelease {
+    name: String,
+    assets: Vec<GithubReleaseAsset>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct GithubReleaseAsset {
+    name: String,
+    download_count: u64,
+}
+
 const DB_DIR: &str = "db";
 const BUILD_DIR: &str = "build";
 const JSON_PATH: &str = "db/db.json";
 const SVG_PATH: &str = "db/plot.svg";
-const VERYL_RELEASE: &str =
+const VERYL_BINARY: &str =
     "https://github.com/veryl-lang/veryl/releases/latest/download/veryl-x86_64-linux.zip";
+const VERYL_RELEASE_API: &str = "https://api.github.com/repos/veryl-lang/veryl/releases";
 
 async fn update(db: &mut Db) -> Result<()> {
     let token = SecretString::from_str(&std::env::var("GITHUB_TOKEN").unwrap())?;
@@ -135,6 +201,19 @@ async fn update(db: &mut Db) -> Result<()> {
     };
 
     db.push_discovered(discovered);
+
+    let client = reqwest::Client::builder()
+        .user_agent("veryl-discovery/0.1.0")
+        .build()?;
+    let releases = client
+        .get(VERYL_RELEASE_API)
+        .send()
+        .await?
+        .json::<Vec<GithubRelease>>()
+        .await?;
+
+    db.push_release(&releases);
+
     db.save(&PathBuf::from(JSON_PATH))?;
 
     Ok(())
@@ -246,7 +325,7 @@ async fn build(db: &mut Db, opt: Option<OptCheck>) -> Result<()> {
             which::which("veryl")?
         }
     } else {
-        let binary = reqwest::get(VERYL_RELEASE).await?.bytes().await?;
+        let binary = reqwest::get(VERYL_BINARY).await?.bytes().await?;
         zip_extract::extract(Cursor::new(binary), &dir, true)?;
         let mut veryl = dir.clone();
         veryl.push("veryl");
