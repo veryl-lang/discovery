@@ -1,7 +1,9 @@
 use crate::OptCheck;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, TimeZone, Utc};
+use octocrab::models::Code;
+use octocrab::Page;
 use plotters::prelude::*;
 use secrecy::SecretString;
 use semver::Version;
@@ -70,11 +72,11 @@ impl Db {
         Ok(())
     }
 
-    pub fn push_discovered(&mut self, discovered: Discovered) {
+    fn push_discovered(&mut self, discovered: Discovered) {
         self.discovered.push(discovered);
     }
 
-    pub fn push_release(&mut self, releases: &[GithubRelease], kind: ReleaseKind) {
+    fn push_release(&mut self, releases: &[GithubRelease], kind: ReleaseKind) {
         let date = Utc::now();
         for release in releases {
             let version = release.name.strip_prefix("v").unwrap();
@@ -144,18 +146,31 @@ impl Db {
         None
     }
 
-    pub async fn update(&mut self) -> Result<()> {
+    async fn search(query: &str, retry: u32) -> Result<Page<Code>> {
         let token = SecretString::from_str(&std::env::var("GITHUB_TOKEN").unwrap())?;
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(token)
             .build()?;
 
-        let page = octocrab.search().code("extension:veryl").send().await?;
+        let mut duration = 30;
+
+        for _ in 0..retry {
+            if let Ok(page) = octocrab.search().code(query).send().await {
+                return Ok(page);
+            } else {
+                time::sleep(Duration::from_secs(duration)).await;
+                duration *= 2;
+            }
+        }
+
+        Err(anyhow!("retry over"))
+    }
+
+    pub async fn update(&mut self) -> Result<()> {
+        let page = Self::search("extension:veryl", 5).await?;
         let sources = page.total_count.unwrap_or(0);
 
-        time::sleep(Duration::from_secs(60)).await;
-
-        let mut page = octocrab.search().code("filename:Veryl.toml").send().await?;
+        let mut page = Self::search("filename:Veryl.toml", 5).await?;
         let mut projects = HashSet::new();
 
         let items = page.take_items();
