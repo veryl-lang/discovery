@@ -21,13 +21,16 @@ use walkdir::WalkDir;
 const VERYL_BINARY: &str =
     "https://github.com/veryl-lang/veryl/releases/latest/download/veryl-x86_64-linux.zip";
 const VERYL_RELEASE_API: &str = "https://api.github.com/repos/veryl-lang/veryl/releases";
+const VERYLUP_RELEASE_API: &str = "https://api.github.com/repos/veryl-lang/verylup/releases";
 
 #[derive(Default, Serialize, Deserialize, Debug)]
 pub struct Db {
     pub discovered: Vec<Discovered>,
     pub projects: HashMap<u64, Project>,
     #[serde(default)]
-    pub downloads: HashMap<Version, Vec<Download>>,
+    pub veryl_downloads: HashMap<Version, Vec<Download>>,
+    #[serde(default)]
+    pub verylup_downloads: HashMap<Version, Vec<Download>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -41,6 +44,12 @@ pub struct BuildLog {
     pub rev: String,
     pub veryl_version: Version,
     pub result: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseKind {
+    Veryl,
+    Verylup,
 }
 
 impl Db {
@@ -65,7 +74,7 @@ impl Db {
         self.discovered.push(discovered);
     }
 
-    pub fn push_release(&mut self, releases: &[GithubRelease]) {
+    pub fn push_release(&mut self, releases: &[GithubRelease], kind: ReleaseKind) {
         let date = Utc::now();
         for release in releases {
             let version = release.name.strip_prefix("v").unwrap();
@@ -74,26 +83,45 @@ impl Db {
             let mut counts = HashMap::new();
 
             for asset in &release.assets {
-                let platform = match asset.name.as_str() {
-                    "veryl-x86_64-linux.zip" => Platform::X86_64Linux,
-                    "veryl-x86_64-mac.zip" => Platform::X86_64Mac,
-                    "veryl-x86_64-windows.zip" => Platform::X86_64Windows,
-                    "veryl-aarch64-mac.zip" => Platform::Aarch64Mac,
-                    _ => unreachable!(),
+                let name = asset.name.as_str();
+                let platform = if name.ends_with("x86_64-linux.zip") {
+                    Platform::X86_64Linux
+                } else if name.ends_with("x86_64-mac.zip") {
+                    Platform::X86_64Mac
+                } else if name.ends_with("x86_64-windows.zip") {
+                    Platform::X86_64Windows
+                } else if name.ends_with("aarch64-mac.zip") {
+                    Platform::Aarch64Mac
+                } else {
+                    unreachable!()
                 };
                 counts.insert(platform, asset.download_count);
             }
 
             let download = Download { date, counts };
 
-            self.downloads
-                .entry(version)
-                .and_modify(|x| {
-                    if x.last().unwrap().counts != download.counts {
-                        x.push(download.clone());
-                    }
-                })
-                .or_insert(vec![download]);
+            match kind {
+                ReleaseKind::Veryl => {
+                    self.veryl_downloads
+                        .entry(version)
+                        .and_modify(|x| {
+                            if x.last().unwrap().counts != download.counts {
+                                x.push(download.clone());
+                            }
+                        })
+                        .or_insert(vec![download]);
+                }
+                ReleaseKind::Verylup => {
+                    self.verylup_downloads
+                        .entry(version)
+                        .and_modify(|x| {
+                            if x.last().unwrap().counts != download.counts {
+                                x.push(download.clone());
+                            }
+                        })
+                        .or_insert(vec![download]);
+                }
+            }
         }
     }
 
@@ -158,14 +186,21 @@ impl Db {
         let client = reqwest::Client::builder()
             .user_agent("veryl-discovery/0.1.0")
             .build()?;
-        let releases = client
+        let veryl_releases = client
             .get(VERYL_RELEASE_API)
             .send()
             .await?
             .json::<Vec<GithubRelease>>()
             .await?;
+        let verylup_releases = client
+            .get(VERYLUP_RELEASE_API)
+            .send()
+            .await?
+            .json::<Vec<GithubRelease>>()
+            .await?;
 
-        self.push_release(&releases);
+        self.push_release(&veryl_releases, ReleaseKind::Veryl);
+        self.push_release(&verylup_releases, ReleaseKind::Verylup);
 
         Ok(())
     }
