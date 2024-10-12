@@ -14,7 +14,6 @@ use std::io::Cursor;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::str::FromStr;
 use std::time::Duration;
 use tokio::time;
 use url::Url;
@@ -147,7 +146,7 @@ impl Db {
     }
 
     async fn search(query: &str, retry: u32) -> Result<Page<Code>> {
-        let token = SecretString::from_str(&std::env::var("GITHUB_TOKEN").unwrap())?;
+        let token = SecretString::from(std::env::var("GITHUB_TOKEN").unwrap());
         let octocrab = octocrab::Octocrab::builder()
             .personal_token(token)
             .build()?;
