@@ -5,7 +5,7 @@ The gathered information is stored in db/db.json of this repository, and updated
 
 ## Usage
 
-To check gathered projects with local `veryl` command.
+The following command checks gathered projects with local `veryl` command.
 This can be used to check whether the Veryl compiler built locally breaks the existing projects.
 
 ```
