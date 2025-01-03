@@ -1,4 +1,5 @@
 use crate::OptCheck;
+use anstyle::{AnsiColor, Style};
 use anyhow::{anyhow, Result};
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, TimeZone, Utc};
@@ -347,7 +348,6 @@ impl Db {
 
             let path = prj.url.path().strip_prefix('/').unwrap();
             let path = PathBuf::from(path);
-            println!("Checkout: {}", prj.url);
 
             let _ = Command::new("git")
                 .arg("clone")
@@ -385,10 +385,25 @@ impl Db {
             }
 
             let result = if let Some(veryl_root) = veryl_root {
-                let build = Command::new(&veryl)
-                    .arg("build")
-                    .current_dir(&veryl_root)
-                    .output()?;
+                let version_arg =
+                    if let Some(x) = opt.as_ref().map(|x| x.veryl_version.clone()).flatten() {
+                        Some(format!("+{x}"))
+                    } else {
+                        None
+                    };
+
+                let build = if let Some(x) = version_arg {
+                    Command::new(&veryl)
+                        .arg(x)
+                        .arg("build")
+                        .current_dir(&veryl_root)
+                        .output()?
+                } else {
+                    Command::new(&veryl)
+                        .arg("build")
+                        .current_dir(&veryl_root)
+                        .output()?
+                };
                 build.status.success()
             } else {
                 false
@@ -403,9 +418,11 @@ impl Db {
             build_logs.push((*id, build_log));
 
             if result {
-                println!("Build Success");
+                let color = Style::new().fg_color(Some(AnsiColor::BrightGreen.into()));
+                println!("{color}Success{color:#}: {}", prj.url);
             } else {
-                println!("Build Failure");
+                let color = Style::new().fg_color(Some(AnsiColor::BrightRed.into()));
+                println!("{color}Failure{color:#}: {}", prj.url);
             }
         }
 

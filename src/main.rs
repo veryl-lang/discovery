@@ -42,6 +42,8 @@ pub struct OptCheck {
     #[arg(long)]
     path: Option<PathBuf>,
     #[arg(long)]
+    veryl_version: Option<String>,
+    #[arg(long)]
     all: bool,
 }
 
