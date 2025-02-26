@@ -9,7 +9,7 @@ edition = "2021"
 anstyle     = "1.0"
 anyhow      = "1.0"
 clap        = {version = "4.5.31", features = ["derive"]}
-chrono      = {version = "0.4.39", features = ["serde"]}
+chrono      = {version = "0.4.40", features = ["serde"]}
 http        = "1.2"
 octocrab    = "0.43.0"
 plotters    = "0.3.7"
