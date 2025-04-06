@@ -332,7 +332,7 @@ impl Db {
 
         let version = Command::new(&veryl).arg("--version").output()?;
         let version = String::from_utf8(version.stdout)?;
-        let version = version.replace("veryl ", "").trim().to_string();
+        let version = version.split_whitespace().nth(1).unwrap();
         let version = Version::parse(&version).unwrap();
 
         let mut build_logs = vec![];
