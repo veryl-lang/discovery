@@ -384,6 +384,8 @@ impl Db {
                 }
             }
 
+            let mut migrated = false;
+
             let result = if let Some(veryl_root) = veryl_root {
                 let version_arg =
                     if let Some(x) = opt.as_ref().map(|x| x.veryl_version.clone()).flatten() {
@@ -392,19 +394,40 @@ impl Db {
                         None
                     };
 
-                let build = if let Some(x) = version_arg {
-                    Command::new(&veryl)
-                        .arg(x)
-                        .arg("build")
-                        .current_dir(&veryl_root)
-                        .output()?
+                let build_args = if let Some(x) = &version_arg {
+                    vec![x.as_str(), "build"]
                 } else {
-                    Command::new(&veryl)
-                        .arg("build")
-                        .current_dir(&veryl_root)
-                        .output()?
+                    vec!["build"]
                 };
-                build.status.success()
+
+                let build = Command::new(&veryl)
+                    .args(&build_args)
+                    .current_dir(&veryl_root)
+                    .output()?;
+                let first_result = build.status.success();
+
+                if first_result {
+                    first_result
+                } else {
+                    migrated = true;
+
+                    // Retry after migrate
+                    let migrate_args = if let Some(x) = &version_arg {
+                        vec![x.as_str(), "migrate"]
+                    } else {
+                        vec!["migrate"]
+                    };
+
+                    let _ = Command::new(&veryl)
+                        .args(&migrate_args)
+                        .current_dir(&veryl_root)
+                        .output()?;
+                    let build = Command::new(&veryl)
+                        .args(&build_args)
+                        .current_dir(&veryl_root)
+                        .output()?;
+                    build.status.success()
+                }
             } else {
                 false
             };
@@ -419,7 +442,11 @@ impl Db {
 
             if result {
                 let color = Style::new().fg_color(Some(AnsiColor::BrightGreen.into()));
-                println!("{color}Success{color:#}: {}", prj.url);
+                if migrated {
+                    println!("{color}Migrate{color:#}: {}", prj.url);
+                } else {
+                    println!("{color}Success{color:#}: {}", prj.url);
+                }
             } else {
                 let color = Style::new().fg_color(Some(AnsiColor::BrightRed.into()));
                 println!("{color}Failure{color:#}: {}", prj.url);
