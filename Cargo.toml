@@ -22,4 +22,4 @@ tokio       = {version = "1.45.0", features = ["full"]}
 url         = "2.5"
 walkdir     = "2.5"
 which       = "7.0"
-zip-extract = "0.3.0"
+zip-extract = "0.4.0"
