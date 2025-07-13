@@ -92,6 +92,8 @@ impl Db {
                     Platform::X86_64Mac
                 } else if name.ends_with("x86_64-windows.zip") {
                     Platform::X86_64Windows
+                } else if name.ends_with("aarch64-linux.zip") {
+                    Platform::Aarch64Linux
                 } else if name.ends_with("aarch64-mac.zip") {
                     Platform::Aarch64Mac
                 } else {
@@ -480,6 +482,7 @@ pub struct Download {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone)]
 pub enum Platform {
+    Aarch64Linux,
     Aarch64Mac,
     X86_64Linux,
     X86_64Mac,
