@@ -366,7 +366,22 @@ impl Db {
                 .arg("rev-parse")
                 .arg("HEAD")
                 .current_dir(&prj_dir)
-                .output()?;
+                .output();
+
+            let Ok(rev) = rev else {
+                let build_log = BuildLog {
+                    rev: "".to_string(),
+                    veryl_version: version.clone(),
+                    result: false,
+                };
+                build_logs.push((*id, build_log));
+
+                let color = Style::new().fg_color(Some(AnsiColor::BrightRed.into()));
+                println!("{color}Failure{color:#}: {}", prj.url);
+
+                continue;
+            };
+
             let rev = String::from_utf8(rev.stdout)?.trim().to_string();
 
             if update_db {
