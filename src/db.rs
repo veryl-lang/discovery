@@ -19,6 +19,7 @@ use std::time::Duration;
 use tokio::time;
 use url::Url;
 use walkdir::WalkDir;
+use zip::read::ZipArchive;
 
 const VERYL_BINARY: &str =
     "https://github.com/veryl-lang/veryl/releases/latest/download/veryl-x86_64-linux.zip";
@@ -326,7 +327,8 @@ impl Db {
             }
         } else {
             let binary = reqwest::get(VERYL_BINARY).await?.bytes().await?;
-            zip_extract::extract(Cursor::new(binary), &dir, true)?;
+            let mut zip = ZipArchive::new(Cursor::new(binary))?;
+            zip.extract_unwrapped_root_dir(&dir, zip::read::root_dir_common_filter)?;
             let mut veryl = dir.to_path_buf();
             veryl.push("veryl");
             veryl.canonicalize()?
