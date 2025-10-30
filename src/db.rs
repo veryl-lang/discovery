@@ -300,6 +300,45 @@ impl Db {
         Ok(())
     }
 
+    fn migrate(version: &Version, veryl: &Path, veryl_root: &Path) -> Result<()> {
+        if version.major == 0 {
+            let mut minor = version.minor;
+
+            let mut migrate_success = false;
+            while minor > 0 {
+                let version_string = format!("+0.{}", minor);
+                let migrate_args = vec![&version_string, "migrate"];
+
+                let migrate = Command::new(&veryl)
+                    .args(&migrate_args)
+                    .current_dir(&veryl_root)
+                    .output()?;
+                if migrate.status.success() {
+                    migrate_success = true;
+                    break;
+                }
+
+                minor -= 1;
+            }
+
+            if migrate_success {
+                while version.minor >= minor {
+                    let version_string = format!("+0.{}", minor);
+                    let migrate_args = vec![&version_string, "migrate"];
+
+                    let _ = Command::new(&veryl)
+                        .args(&migrate_args)
+                        .current_dir(&veryl_root)
+                        .output()?;
+
+                    minor += 1;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub async fn build<T: AsRef<Path>>(&mut self, path: T, opt: Option<OptCheck>) -> Result<()> {
         let update_db = opt.is_none();
 
@@ -430,17 +469,8 @@ impl Db {
                 } else {
                     migrated = true;
 
-                    // Retry after migrate
-                    let migrate_args = if let Some(x) = &version_arg {
-                        vec![x.as_str(), "migrate"]
-                    } else {
-                        vec!["migrate"]
-                    };
+                    Self::migrate(&version, &veryl, &veryl_root)?;
 
-                    let _ = Command::new(&veryl)
-                        .args(&migrate_args)
-                        .current_dir(&veryl_root)
-                        .output()?;
                     let build = Command::new(&veryl)
                         .args(&build_args)
                         .current_dir(&veryl_root)
