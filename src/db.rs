@@ -97,6 +97,8 @@ impl Db {
                     Platform::Aarch64Linux
                 } else if name.ends_with("aarch64-mac.zip") {
                     Platform::Aarch64Mac
+                } else if name.ends_with("aarch64-windows.zip") {
+                    Platform::Aarch64Windows
                 } else {
                     unreachable!()
                 };
@@ -531,6 +533,7 @@ pub struct Download {
 pub enum Platform {
     Aarch64Linux,
     Aarch64Mac,
+    Aarch64Windows,
     X86_64Linux,
     X86_64Mac,
     X86_64Windows,
