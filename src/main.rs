@@ -1,4 +1,5 @@
 mod db;
+mod utils;
 
 use crate::db::Db;
 use anyhow::Result;
@@ -45,6 +46,8 @@ pub struct OptCheck {
     veryl_version: Option<String>,
     #[arg(long)]
     all: bool,
+    #[arg(long)]
+    ref_version: Option<String>,
 }
 
 #[tokio::main]
