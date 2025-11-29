@@ -12,6 +12,13 @@ This can be used to check whether the Veryl compiler built locally breaks the ex
 $ cargo run -- check
 ```
 
+If `--ref-version` is specified, the build artifacts are compared with the reference version,
+and the differences are checked.
+
+```
+$ cargo run -- check --ref-version 0.17.0
+```
+
 To specify version of Veryl compiler, `--veryl-version` option can be used.
 This feature requires [verylup](https://github.com/veryl-lang/verylup).
 
