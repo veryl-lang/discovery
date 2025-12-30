@@ -398,17 +398,19 @@ impl Db {
                 }
             }
 
-            let mut veryl_root = None;
+            let mut veryl_roots = vec![];
             for entry in WalkDir::new(&prj_dir) {
                 let entry = entry?;
                 if entry.file_name() == "Veryl.toml" {
-                    veryl_root = Some(entry.path().parent().unwrap().to_path_buf());
+                    veryl_roots.push(entry.path().parent().unwrap().to_path_buf());
                 }
             }
 
             let mut migrated = false;
+            let mut prj_result = true;
+            let mut fail_paths = vec![];
 
-            let result = if let Some(veryl_root) = veryl_root {
+            for veryl_root in veryl_roots {
                 let version_arg =
                     if let Some(x) = opt.as_ref().map(|x| x.veryl_version.clone()).flatten() {
                         Some(format!("+{x}"))
@@ -419,14 +421,16 @@ impl Db {
                 let mut build_info = VerylBuildInfo {
                     version: version.clone(),
                     veryl: veryl.clone(),
-                    veryl_root,
+                    veryl_root: veryl_root.clone(),
                     version_arg: version_arg.clone(),
                     compare: false,
                 };
 
                 let check_result = veryl_build(&build_info, &mut migrated)?;
 
-                if let Some(ref_version) = opt.as_ref().map(|x| x.ref_version.clone()).flatten() {
+                let result = if let Some(ref_version) =
+                    opt.as_ref().map(|x| x.ref_version.clone()).flatten()
+                {
                     let ref_version = Some(format!("+{ref_version}"));
                     build_info.version_arg = ref_version;
                     let _ = veryl_build(&build_info, &mut migrated)?;
@@ -436,20 +440,28 @@ impl Db {
                     veryl_build(&build_info, &mut migrated)?
                 } else {
                     check_result
+                };
+
+                if !result {
+                    prj_result = false;
+                    let path = if veryl_root == prj_dir {
+                        PathBuf::from(".")
+                    } else {
+                        veryl_root.strip_prefix(&prj_dir).unwrap().to_path_buf()
+                    };
+                    fail_paths.push(path);
                 }
-            } else {
-                false
-            };
+            }
 
             let build_log = BuildLog {
                 rev,
                 veryl_version: version.clone(),
-                result,
+                result: prj_result,
             };
 
             build_logs.push((*id, build_log));
 
-            if result {
+            if prj_result {
                 let color = Style::new().fg_color(Some(AnsiColor::BrightGreen.into()));
                 if migrated {
                     println!("{color}Migrate{color:#}: {}", prj.url);
@@ -458,7 +470,11 @@ impl Db {
                 }
             } else {
                 let color = Style::new().fg_color(Some(AnsiColor::BrightRed.into()));
-                println!("{color}Failure{color:#}: {}", prj.url);
+                let mut fails = String::new();
+                for x in fail_paths {
+                    fails.push_str(&format!(" {}", x.to_string_lossy()));
+                }
+                println!("{color}Failure{color:#}: {} ({})", prj.url, &fails[1..]);
             }
         }
 
