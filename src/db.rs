@@ -37,13 +37,13 @@ pub struct Db {
     pub verylup_downloads: HashMap<Version, Vec<Download>>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Project {
     pub url: Url,
     pub build_logs: Vec<BuildLog>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BuildLog {
     pub rev: String,
     pub veryl_version: Version,
@@ -342,8 +342,11 @@ impl Db {
         let version = version.split_whitespace().nth(1).unwrap();
         let version = Version::parse(&version).unwrap();
 
+        let mut projects: Vec<_> = self.projects.clone().into_iter().collect();
+        projects.sort_by_key(|x| x.0);
+
         let mut build_logs = vec![];
-        for (id, prj) in &self.projects {
+        for (id, prj) in &projects {
             if !update_db {
                 let latest_log = prj.build_logs.last();
                 if let Some(latest_log) = latest_log {
