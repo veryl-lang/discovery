@@ -4,8 +4,9 @@ use anstyle::{AnsiColor, Style};
 use anyhow::{anyhow, Result};
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, TimeZone, Utc};
+use futures_util::TryStreamExt;
 use octocrab::models::Code;
-use octocrab::Page;
+use octocrab::{Octocrab, Page};
 use plotters::prelude::*;
 use secrecy::SecretString;
 use semver::Version;
@@ -17,6 +18,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
+use tokio::pin;
 use tokio::time;
 use url::Url;
 use walkdir::WalkDir;
@@ -152,12 +154,7 @@ impl Db {
         None
     }
 
-    async fn search(query: &str, retry: u32) -> Result<Page<Code>> {
-        let token = SecretString::from(std::env::var("GITHUB_TOKEN").unwrap());
-        let octocrab = octocrab::Octocrab::builder()
-            .personal_token(token)
-            .build()?;
-
+    async fn search(octocrab: &Octocrab, query: &str, retry: u32) -> Result<Page<Code>> {
         let mut duration = 30;
 
         for _ in 0..retry {
@@ -173,14 +170,18 @@ impl Db {
     }
 
     pub async fn update(&mut self) -> Result<()> {
-        let page = Self::search("extension:veryl", 5).await?;
+        let token = SecretString::from(std::env::var("GITHUB_TOKEN").unwrap());
+        let octocrab = Octocrab::builder().personal_token(token).build()?;
+
+        let page = Self::search(&octocrab, "extension:veryl", 5).await?;
         let sources = page.total_count.unwrap_or(0);
 
-        let mut page = Self::search("filename:Veryl.toml", 5).await?;
-        let mut projects = HashSet::new();
+        let page = Self::search(&octocrab, "filename:Veryl.toml", 5).await?;
+        let stream = page.into_stream(&octocrab);
+        pin!(stream);
 
-        let items = page.take_items();
-        for item in items {
+        let mut projects = HashSet::new();
+        while let Some(item) = stream.try_next().await? {
             let repo = item.repository.full_name;
             if let Some(repo) = repo {
                 let url = Url::parse(&format!("https://github.com/{}", repo)).unwrap();
