@@ -482,6 +482,10 @@ impl Db {
             }
         }
 
+        let total = build_logs.len();
+        let success = build_logs.iter().filter(|x| x.1.result).count();
+        println!("\nSuccess: {} / Total: {}\n", success, total);
+
         for (id, build_log) in build_logs {
             self.projects
                 .entry(id)
