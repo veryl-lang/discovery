@@ -17,8 +17,10 @@ use std::io::Cursor;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::pin;
+use tokio::sync::Semaphore;
 use tokio::time;
 use url::Url;
 use walkdir::WalkDir;
@@ -346,7 +348,20 @@ impl Db {
         let mut projects: Vec<_> = self.projects.clone().into_iter().collect();
         projects.sort_by_key(|x| x.0);
 
-        let mut build_logs = vec![];
+        enum BuildResult {
+            Log(u64, BuildLog, OutputInfo),
+            Skipped,
+        }
+
+        enum OutputInfo {
+            Success(String),
+            Migrated(String),
+            Failure(String, Vec<PathBuf>),
+        }
+
+        let semaphore = Arc::new(Semaphore::new(8));
+        let mut handles = vec![];
+
         for (id, prj) in &projects {
             if !update_db {
                 let latest_log = prj.build_logs.last();
@@ -357,128 +372,177 @@ impl Db {
                 }
             }
 
-            let path = prj.url.path().strip_prefix('/').unwrap();
-            let path = PathBuf::from(path);
+            let id = *id;
+            let prj_url = prj.url.clone();
+            let prj_build_logs = prj.build_logs.clone();
+            let dir = dir.to_path_buf();
+            let veryl = veryl.clone();
+            let version = version.clone();
+            let opt = opt.clone();
+            let sem = Arc::clone(&semaphore);
 
-            let _ = Command::new("git")
-                .arg("clone")
-                .arg("--depth=1")
-                .arg(prj.url.as_str())
-                .arg(&path)
-                .current_dir(&dir)
-                .output()?;
+            let handle = tokio::spawn(async move {
+                let _permit = sem.acquire().await.unwrap();
 
-            let mut prj_dir = dir.to_path_buf();
-            prj_dir.push(&path);
+                tokio::task::spawn_blocking(move || -> Result<BuildResult> {
+                    let path_str = prj_url.path().strip_prefix('/').unwrap();
+                    let path = PathBuf::from(path_str);
 
-            let rev = Command::new("git")
-                .arg("rev-parse")
-                .arg("HEAD")
-                .current_dir(&prj_dir)
-                .output();
+                    let _ = Command::new("git")
+                        .arg("clone")
+                        .arg("--depth=1")
+                        .arg(prj_url.as_str())
+                        .arg(&path)
+                        .current_dir(&dir)
+                        .output()?;
 
-            let Ok(rev) = rev else {
-                let build_log = BuildLog {
-                    rev: "".to_string(),
-                    veryl_version: version.clone(),
-                    result: false,
-                };
-                build_logs.push((*id, build_log));
+                    let mut prj_dir = dir.to_path_buf();
+                    prj_dir.push(&path);
 
-                let color = Style::new().fg_color(Some(AnsiColor::BrightRed.into()));
-                println!("{color}Failure{color:#}: {}", prj.url);
+                    let rev = Command::new("git")
+                        .arg("rev-parse")
+                        .arg("HEAD")
+                        .current_dir(&prj_dir)
+                        .output();
 
-                continue;
-            };
+                    let Ok(rev) = rev else {
+                        let build_log = BuildLog {
+                            rev: "".to_string(),
+                            veryl_version: version.clone(),
+                            result: false,
+                        };
+                        return Ok(BuildResult::Log(
+                            id,
+                            build_log,
+                            OutputInfo::Failure(prj_url.to_string(), vec![]),
+                        ));
+                    };
 
-            let rev = String::from_utf8(rev.stdout)?.trim().to_string();
+                    let rev = String::from_utf8(rev.stdout)?.trim().to_string();
 
-            if update_db {
-                let latest_log = prj.build_logs.last();
-                if let Some(latest_log) = latest_log {
-                    if latest_log.rev == rev && latest_log.veryl_version == version {
-                        continue;
+                    if update_db {
+                        let latest_log = prj_build_logs.last();
+                        if let Some(latest_log) = latest_log {
+                            if latest_log.rev == rev && latest_log.veryl_version == version {
+                                return Ok(BuildResult::Skipped);
+                            }
+                        }
                     }
-                }
-            }
 
-            let mut veryl_roots = vec![];
-            for entry in WalkDir::new(&prj_dir) {
-                let entry = entry?;
-                if entry.file_name() == "Veryl.toml" {
-                    veryl_roots.push(entry.path().parent().unwrap().to_path_buf());
-                }
-            }
+                    let mut veryl_roots = vec![];
+                    for entry in WalkDir::new(&prj_dir) {
+                        let entry = entry?;
+                        if entry.file_name() == "Veryl.toml" {
+                            veryl_roots.push(entry.path().parent().unwrap().to_path_buf());
+                        }
+                    }
 
-            let mut migrated = false;
-            let mut prj_result = true;
-            let mut fail_paths = vec![];
+                    let mut migrated = false;
+                    let mut prj_result = true;
+                    let mut fail_paths = vec![];
 
-            for veryl_root in veryl_roots {
-                let version_arg =
-                    if let Some(x) = opt.as_ref().map(|x| x.veryl_version.clone()).flatten() {
-                        Some(format!("+{x}"))
-                    } else {
-                        None
+                    for veryl_root in veryl_roots {
+                        let version_arg =
+                            if let Some(x) = opt.as_ref().map(|x| x.veryl_version.clone()).flatten()
+                            {
+                                Some(format!("+{x}"))
+                            } else {
+                                None
+                            };
+
+                        let mut build_info = VerylBuildInfo {
+                            version: version.clone(),
+                            veryl: veryl.clone(),
+                            veryl_root: veryl_root.clone(),
+                            version_arg: version_arg.clone(),
+                            compare: false,
+                        };
+
+                        let check_result = veryl_build(&build_info, &mut migrated)?;
+
+                        let result = if let Some(ref_version) =
+                            opt.as_ref().map(|x| x.ref_version.clone()).flatten()
+                        {
+                            let ref_version = Some(format!("+{ref_version}"));
+                            build_info.version_arg = ref_version;
+                            let _ = veryl_build(&build_info, &mut migrated)?;
+
+                            build_info.version_arg = version_arg;
+                            build_info.compare = true;
+                            veryl_build(&build_info, &mut migrated)?
+                        } else {
+                            check_result
+                        };
+
+                        if !result {
+                            prj_result = false;
+                            let path = if veryl_root == prj_dir {
+                                PathBuf::from(".")
+                            } else {
+                                veryl_root.strip_prefix(&prj_dir).unwrap().to_path_buf()
+                            };
+                            fail_paths.push(path);
+                        }
+                    }
+
+                    let build_log = BuildLog {
+                        rev,
+                        veryl_version: version.clone(),
+                        result: prj_result,
                     };
 
-                let mut build_info = VerylBuildInfo {
-                    version: version.clone(),
-                    veryl: veryl.clone(),
-                    veryl_root: veryl_root.clone(),
-                    version_arg: version_arg.clone(),
-                    compare: false,
-                };
-
-                let check_result = veryl_build(&build_info, &mut migrated)?;
-
-                let result = if let Some(ref_version) =
-                    opt.as_ref().map(|x| x.ref_version.clone()).flatten()
-                {
-                    let ref_version = Some(format!("+{ref_version}"));
-                    build_info.version_arg = ref_version;
-                    let _ = veryl_build(&build_info, &mut migrated)?;
-
-                    build_info.version_arg = version_arg;
-                    build_info.compare = true;
-                    veryl_build(&build_info, &mut migrated)?
-                } else {
-                    check_result
-                };
-
-                if !result {
-                    prj_result = false;
-                    let path = if veryl_root == prj_dir {
-                        PathBuf::from(".")
+                    let output = if prj_result {
+                        if migrated {
+                            OutputInfo::Migrated(prj_url.to_string())
+                        } else {
+                            OutputInfo::Success(prj_url.to_string())
+                        }
                     } else {
-                        veryl_root.strip_prefix(&prj_dir).unwrap().to_path_buf()
+                        OutputInfo::Failure(prj_url.to_string(), fail_paths)
                     };
-                    fail_paths.push(path);
-                }
-            }
 
-            let build_log = BuildLog {
-                rev,
-                veryl_version: version.clone(),
-                result: prj_result,
-            };
+                    Ok(BuildResult::Log(id, build_log, output))
+                })
+                .await?
+            });
 
-            build_logs.push((*id, build_log));
+            handles.push(handle);
+        }
 
-            if prj_result {
-                let color = Style::new().fg_color(Some(AnsiColor::BrightGreen.into()));
-                if migrated {
-                    println!("{color}Migrate{color:#}: {}", prj.url);
-                } else {
-                    println!("{color}Success{color:#}: {}", prj.url);
+        let mut build_logs = vec![];
+        for handle in handles {
+            match handle.await? {
+                Ok(BuildResult::Log(id, log, output)) => {
+                    match &output {
+                        OutputInfo::Success(url) => {
+                            let color =
+                                Style::new().fg_color(Some(AnsiColor::BrightGreen.into()));
+                            println!("{color}Success{color:#}: {}", url);
+                        }
+                        OutputInfo::Migrated(url) => {
+                            let color =
+                                Style::new().fg_color(Some(AnsiColor::BrightGreen.into()));
+                            println!("{color}Migrate{color:#}: {}", url);
+                        }
+                        OutputInfo::Failure(url, fail_paths) => {
+                            let color =
+                                Style::new().fg_color(Some(AnsiColor::BrightRed.into()));
+                            if fail_paths.is_empty() {
+                                println!("{color}Failure{color:#}: {}", url);
+                            } else {
+                                let fails: String = fail_paths
+                                    .iter()
+                                    .map(|x| x.to_string_lossy().to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                println!("{color}Failure{color:#}: {} ({})", url, fails);
+                            }
+                        }
+                    }
+                    build_logs.push((id, log));
                 }
-            } else {
-                let color = Style::new().fg_color(Some(AnsiColor::BrightRed.into()));
-                let mut fails = String::new();
-                for x in fail_paths {
-                    fails.push_str(&format!(" {}", x.to_string_lossy()));
-                }
-                println!("{color}Failure{color:#}: {} ({})", prj.url, &fails[1..]);
+                Ok(BuildResult::Skipped) => {}
+                Err(e) => eprintln!("Task error: {e}"),
             }
         }
 

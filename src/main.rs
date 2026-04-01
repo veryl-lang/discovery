@@ -38,7 +38,7 @@ enum Commands {
 pub struct OptUpdate;
 
 /// Check
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub struct OptCheck {
     #[arg(long)]
     path: Option<PathBuf>,
