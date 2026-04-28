@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 const DB_DIR: &str = "db";
 const BUILD_DIR: &str = "build";
+const CACHE_DIR: &str = "cache";
 const JSON_PATH: &str = "db/db.json";
 const SVG_PATH: &str = "db/plot.svg";
 
@@ -58,6 +59,15 @@ async fn main() -> Result<()> {
     if !dir.exists() {
         std::fs::create_dir(DB_DIR)?;
     }
+
+    // Isolate the veryl cache so migrate commits in dependency caches do not
+    // pollute the user's global `~/.cache/veryl`.
+    let cache_dir = PathBuf::from(CACHE_DIR);
+    if !cache_dir.exists() {
+        std::fs::create_dir(&cache_dir)?;
+    }
+    // SAFETY: set before any thread spawn.
+    unsafe { std::env::set_var("XDG_CACHE_HOME", cache_dir.canonicalize()?) };
 
     let mut db = if path.exists() {
         Db::load(&path)?
