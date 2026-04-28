@@ -2990,6 +2990,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "dirs",
  "futures-util",
  "http",
  "octocrab",

@@ -9,6 +9,7 @@ pub struct VerylBuildInfo {
     pub veryl_root: PathBuf,
     pub version_arg: Option<String>,
     pub compare: bool,
+    pub local: bool,
 }
 
 pub fn veryl_build(info: &VerylBuildInfo, migrated: &mut bool) -> Result<bool> {
@@ -34,6 +35,11 @@ pub fn veryl_build(info: &VerylBuildInfo, migrated: &mut bool) -> Result<bool> {
         *migrated = true;
 
         migrate(&info.version, &info.veryl, &info.veryl_root)?;
+        if info.local {
+            // The released-version chain above does not cover the unreleased
+            // breaking change in the local binary itself.
+            migrate_local(&info.veryl, &info.veryl_root)?;
+        }
 
         let build = Command::new(&info.veryl)
             .args(&build_args)
@@ -41,6 +47,67 @@ pub fn veryl_build(info: &VerylBuildInfo, migrated: &mut bool) -> Result<bool> {
             .output()?;
         Ok(build.status.success())
     }
+}
+
+fn migrate_local(veryl: &Path, veryl_root: &Path) -> Result<()> {
+    let _ = Command::new(veryl)
+        .arg("migrate")
+        .current_dir(veryl_root)
+        .output()?;
+
+    // `veryl build` wipes a dependency cache whose working tree is dirty
+    // (lockfile.rs `is_clean`), discarding migrations just applied. Commit
+    // so the next build sees a clean tree.
+    commit_dirty_dependency_caches()?;
+    Ok(())
+}
+
+fn commit_dirty_dependency_caches() -> Result<()> {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(dirs::cache_dir);
+    let cache_root = match base {
+        Some(dir) => dir.join("veryl").join("dependencies"),
+        None => return Ok(()),
+    };
+
+    if !cache_root.exists() {
+        return Ok(());
+    }
+
+    for entry in std::fs::read_dir(&cache_root)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        if !path.join(".git").exists() {
+            continue;
+        }
+
+        let status = Command::new("git")
+            .args(["status", "-s"])
+            .current_dir(&path)
+            .output()?;
+        if !status.status.success() || status.stdout.is_empty() {
+            continue;
+        }
+
+        let _ = Command::new("git")
+            .args([
+                "-c",
+                "user.email=migrate@discovery",
+                "-c",
+                "user.name=discovery",
+                "commit",
+                "-am",
+                "migrate",
+            ])
+            .current_dir(&path)
+            .output()?;
+    }
+
+    Ok(())
 }
 
 fn migrate(version: &Version, veryl: &Path, veryl_root: &Path) -> Result<()> {

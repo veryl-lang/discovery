@@ -345,6 +345,9 @@ impl Db {
         let version = version.split_whitespace().nth(1).unwrap();
         let version = Version::parse(&version).unwrap();
 
+        // verylup tags a locally registered toolchain with a `-local` pre-release.
+        let local = version.pre.as_str() == "local";
+
         let mut projects: Vec<_> = self.projects.clone().into_iter().collect();
         projects.sort_by_key(|x| x.0);
 
@@ -456,6 +459,7 @@ impl Db {
                             veryl_root: veryl_root.clone(),
                             version_arg: version_arg.clone(),
                             compare: false,
+                            local,
                         };
 
                         let check_result = veryl_build(&build_info, &mut migrated)?;
