@@ -34,7 +34,7 @@ pub fn veryl_build(info: &VerylBuildInfo, migrated: &mut bool) -> Result<bool> {
     } else {
         *migrated = true;
 
-        migrate(&info.version, &info.veryl, &info.veryl_root)?;
+        migrate(&info.version, &info.veryl_root)?;
         if info.local {
             // The released-version chain above does not cover the unreleased
             // breaking change in the local binary itself.
@@ -110,7 +110,12 @@ fn commit_dirty_dependency_caches() -> Result<()> {
     Ok(())
 }
 
-fn migrate(version: &Version, veryl: &Path, veryl_root: &Path) -> Result<()> {
+fn migrate(version: &Version, veryl_root: &Path) -> Result<()> {
+    // `+0.N` is a verylup-proxy feature; `--path` binaries don't proxy.
+    let Ok(proxy) = which::which("veryl") else {
+        return Ok(());
+    };
+
     if version.major == 0 {
         let mut minor = version.minor;
 
@@ -119,7 +124,7 @@ fn migrate(version: &Version, veryl: &Path, veryl_root: &Path) -> Result<()> {
             let version_string = format!("+0.{}", minor);
             let migrate_args = vec![&version_string, "migrate"];
 
-            let migrate = Command::new(&veryl)
+            let migrate = Command::new(&proxy)
                 .args(&migrate_args)
                 .current_dir(&veryl_root)
                 .output()?;
@@ -136,7 +141,7 @@ fn migrate(version: &Version, veryl: &Path, veryl_root: &Path) -> Result<()> {
                 let version_string = format!("+0.{}", minor);
                 let migrate_args = vec![&version_string, "migrate"];
 
-                let _ = Command::new(&veryl)
+                let _ = Command::new(&proxy)
                     .args(&migrate_args)
                     .current_dir(&veryl_root)
                     .output()?;

@@ -345,8 +345,10 @@ impl Db {
         let version = version.split_whitespace().nth(1).unwrap();
         let version = Version::parse(&version).unwrap();
 
-        // verylup tags a locally registered toolchain with a `-local` pre-release.
-        let local = version.pre.as_str() == "local";
+        // `local` triggers `migrate_local()` for HEAD-only migrations:
+        // either a `-local` pre-release tag (verylup link) or `--path`.
+        let local = version.pre.as_str() == "local"
+            || opt.as_ref().and_then(|x| x.path.as_ref()).is_some();
 
         let mut projects: Vec<_> = self.projects.clone().into_iter().collect();
         projects.sort_by_key(|x| x.0);
