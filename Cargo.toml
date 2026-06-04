@@ -13,7 +13,7 @@ chrono       = {version = "0.4.44", features = ["serde"]}
 dirs         = "6.0"
 futures-util = "0.3.32"
 http         = "1.4"
-octocrab     = {version = "0.51.0", features = ["stream"]}
+octocrab     = {version = "0.53.0", features = ["stream"]}
 plotters     = "0.3.7"
 reqwest      = {version = "0.12.9", features = ["json"]}
 secrecy      = "0.10.3"
