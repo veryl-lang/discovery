@@ -4,7 +4,6 @@ use anstyle::{AnsiColor, Style};
 use anyhow::{anyhow, Result};
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, TimeZone, Utc};
-use futures_util::TryStreamExt;
 use octocrab::models::Code;
 use octocrab::{Octocrab, Page};
 use plotters::prelude::*;
@@ -19,7 +18,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::pin;
 use tokio::sync::Semaphore;
 use tokio::time;
 use url::Url;
@@ -160,8 +158,32 @@ impl Db {
         let mut duration = 30;
 
         for _ in 0..retry {
-            if let Ok(page) = octocrab.search().code(query).send().await {
+            // Max per_page reduces the number of paginated requests.
+            if let Ok(page) = octocrab.search().code(query).per_page(100).send().await {
                 return Ok(page);
+            } else {
+                time::sleep(Duration::from_secs(duration)).await;
+                duration *= 2;
+            }
+        }
+
+        Err(anyhow!("retry over"))
+    }
+
+    async fn next_page(
+        octocrab: &Octocrab,
+        page: &Page<Code>,
+        retry: u32,
+    ) -> Result<Option<Page<Code>>> {
+        if page.next.is_none() {
+            return Ok(None);
+        }
+
+        let mut duration = 30;
+
+        for _ in 0..retry {
+            if let Ok(next) = octocrab.get_page::<Code>(&page.next).await {
+                return Ok(next);
             } else {
                 time::sleep(Duration::from_secs(duration)).await;
                 duration *= 2;
@@ -178,21 +200,26 @@ impl Db {
         let page = Self::search(&octocrab, "extension:veryl", 5).await?;
         let sources = page.total_count.unwrap_or(0);
 
-        let page = Self::search(&octocrab, "filename:Veryl.toml", 5).await?;
-        let stream = page.into_stream(&octocrab);
-        pin!(stream);
+        let mut page = Self::search(&octocrab, "filename:Veryl.toml", 5).await?;
 
         let mut projects = HashSet::new();
-        while let Some(item) = stream.try_next().await? {
-            let repo = item.repository.full_name;
-            if let Some(repo) = repo {
-                let url = Url::parse(&format!("https://github.com/{}", repo)).unwrap();
-                let project = Project {
-                    url,
-                    build_logs: vec![],
-                };
-                let id = self.insert_project(project);
-                projects.insert(id);
+        loop {
+            for item in &page.items {
+                let repo = item.repository.full_name.clone();
+                if let Some(repo) = repo {
+                    let url = Url::parse(&format!("https://github.com/{}", repo)).unwrap();
+                    let project = Project {
+                        url,
+                        build_logs: vec![],
+                    };
+                    let id = self.insert_project(project);
+                    projects.insert(id);
+                }
+            }
+
+            match Self::next_page(&octocrab, &page, 5).await? {
+                Some(next) => page = next,
+                None => break,
             }
         }
 
