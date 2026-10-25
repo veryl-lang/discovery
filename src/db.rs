@@ -159,12 +159,12 @@ impl Db {
 
         for _ in 0..retry {
             // Max per_page reduces the number of paginated requests.
-            if let Ok(page) = octocrab.search().code(query).per_page(100).send().await {
-                return Ok(page);
-            } else {
-                time::sleep(Duration::from_secs(duration)).await;
-                duration *= 2;
+            match octocrab.search().code(query).per_page(100).send().await {
+                Ok(page) => return Ok(page),
+                Err(e) => eprintln!("code search failed: {:#}", anyhow::Error::from(e)),
             }
+            time::sleep(Duration::from_secs(duration)).await;
+            duration *= 2;
         }
 
         Err(anyhow!("retry over"))
@@ -182,12 +182,15 @@ impl Db {
         let mut duration = 30;
 
         for _ in 0..retry {
-            if let Ok(next) = octocrab.get_page::<Code>(&page.next).await {
-                return Ok(next);
-            } else {
-                time::sleep(Duration::from_secs(duration)).await;
-                duration *= 2;
+            match octocrab.get_page::<Code>(&page.next).await {
+                Ok(next) => return Ok(next),
+                Err(e) => eprintln!(
+                    "code search pagination failed: {:#}",
+                    anyhow::Error::from(e)
+                ),
             }
+            time::sleep(Duration::from_secs(duration)).await;
+            duration *= 2;
         }
 
         Err(anyhow!("retry over"))
