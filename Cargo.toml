@@ -14,7 +14,7 @@ dirs         = "6.0"
 http         = "1.4"
 octocrab     = {version = "0.54.0", features = ["stream"]}
 plotters     = "0.3.7"
-reqwest      = {version = "0.12.9", features = ["json"]}
+reqwest      = {version = "0.13.5", features = ["json"]}
 secrecy      = "0.10.3"
 semver       = {version = "1.0", features = ["serde"]}
 serde        = {version = "1.0", features = ["derive"]}
