@@ -197,8 +197,10 @@ impl Db {
     }
 
     pub async fn update(&mut self) -> Result<()> {
-        let token = SecretString::from(std::env::var("GITHUB_TOKEN").unwrap());
-        let octocrab = Octocrab::builder().personal_token(token).build()?;
+        let token = std::env::var("GITHUB_TOKEN").unwrap();
+        let octocrab = Octocrab::builder()
+            .personal_token(SecretString::from(token.clone()))
+            .build()?;
 
         let page = Self::search(&octocrab, "extension:veryl", 5).await?;
         let sources = page.total_count.unwrap_or(0);
@@ -240,16 +242,21 @@ impl Db {
         let client = reqwest::Client::builder()
             .user_agent("veryl-discovery/0.1.0")
             .build()?;
+        // Unauthenticated requests share the per-IP quota of the CI runner.
         let veryl_releases = client
             .get(VERYL_RELEASE_API)
+            .bearer_auth(&token)
             .send()
             .await?
+            .error_for_status()?
             .json::<Vec<GithubRelease>>()
             .await?;
         let verylup_releases = client
             .get(VERYLUP_RELEASE_API)
+            .bearer_auth(&token)
             .send()
             .await?
+            .error_for_status()?
             .json::<Vec<GithubRelease>>()
             .await?;
 
@@ -362,7 +369,11 @@ impl Db {
                 which::which("veryl")?
             }
         } else {
-            let binary = reqwest::get(VERYL_BINARY).await?.bytes().await?;
+            let binary = reqwest::get(VERYL_BINARY)
+                .await?
+                .error_for_status()?
+                .bytes()
+                .await?;
             let mut zip = ZipArchive::new(Cursor::new(binary))?;
             zip.extract_unwrapped_root_dir(&dir, zip::read::root_dir_common_filter)?;
             let mut veryl = dir.to_path_buf();
