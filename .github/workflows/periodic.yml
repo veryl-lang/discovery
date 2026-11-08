@@ -16,7 +16,8 @@ jobs:
     - name: Run
       run: cargo run -- update
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # The code search quota of the Actions token is shared and often exhausted.
+        GITHUB_TOKEN: ${{ secrets.SEARCH_TOKEN || secrets.GITHUB_TOKEN }}
 
     - name: Commit
       uses: EndBug/add-and-commit@v9
